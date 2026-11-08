@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TarsCore 2.0 — Enterprise AI Security Gateway</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            color: #fff;
+            min-height: 100vh;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        header { text-align: center; padding: 3rem 0; }
+        h1 { font-size: 2.5rem; margin-bottom: 0.5rem; background: linear-gradient(90deg, #00d2ff, #3a7bd5); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .subtitle { color: #aaa; font-size: 1.1rem; }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-5px); box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .stat-value { font-size: 2rem; font-weight: bold; color: #00d2ff; }
+        .stat-label { color: #888; margin-top: 0.5rem; font-size: 0.9rem; }
+        
+        .section { margin: 2rem 0; }
+        .section-title { font-size: 1.5rem; margin-bottom: 1rem; border-left: 4px solid #00d2ff; padding-left: 1rem; }
+        
+        .modules-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
+        .module-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 1.2rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .module-card:hover { border-color: #00d2ff; background: rgba(0,210,255,0.1); }
+        .module-name { font-weight: bold; margin-bottom: 0.3rem; }
+        .module-status { font-size: 0.85rem; }
+        .status-active { color: #00ff88; }
+        .status-inactive { color: #ff6b6b; }
+        
+        footer { text-align: center; padding: 2rem 0; color: #555; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>TarsCore 2.0</h1>
+            <p class="subtitle">Enterprise-Grade Unified AI Security Gateway · Inspired by Tencent NT Architecture & Alibaba Sentinel</p>
+        </header>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="uptime">0s</div>
+                <div class="stat-label">Uptime</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="total-req">0</div>
+                <div class="stat-label">Total Requests</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="success-req">0</div>
+                <div class="stat-label">Success Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="blocked">0</div>
+                <div class="stat-label">WAF Blocked</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2 class="section-title">Security Modules</h2>
+            <div class="modules-grid" id="security-modules"></div>
+        </div>
+        
+        <div class="section">
+            <h2 class="section-title">Traffic Governance</h2>
+            <div class="modules-grid" id="traffic-modules"></div>
+        </div>
+        
+        <div class="section">
+            <h2 class="section-title">Platform Capabilities</h2>
+            <div class="modules-grid" id="platform-modules"></div>
+        </div>
+        
+        <footer>
+            <p>TarsCore v<span id="version">2.0.0</span> · MIT License · Built with Go 1.22+</p>
+        </footer>
+    </div>
+    
+    <script>
+        const modules = [
+            { name: "WAF Engine", status: true, cat: "security" },
+            { name: "Gatekeeper", status: true, cat: "security" },
+            { name: "SSRF Guard", status: true, cat: "security" },
+            { name: "Semantic Guard", status: true, cat: "security" },
+            { name: "RBAC Auth", status: true, cat: "security" },
+            { name: "Circuit Breaker", status: true, cat: "traffic" },
+            { name: "Rate Limiter", status: true, cat: "traffic" },
+            { name: "Smart Router", status: true, cat: "traffic" },
+            { name: "Model Manager", status: true, cat: "platform" },
+            { name: "Tool Registry", status: true, cat: "platform" },
+            { name: "i18n Engine", status: true, cat: "platform" },
+            { name: "Observability", status: true, cat: "platform" },
+        ];
+        
+        function renderModules(containerId, filtered) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = filtered.map(m => `
+                <div class="module-card">
+                    <div class="module-name">${m.name}</div>
+                    <div class="module-status ${m.status ? 'status-active' : 'status-inactive'}">
+                        ${m.status ? '● Active' : '○ Inactive'}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        renderModules('security-modules', modules.filter(m => m.cat === 'security'));
+        renderModules('traffic-modules', modules.filter(m => m.cat === 'traffic'));
+        renderModules('platform-modules', modules.filter(m => m.cat === 'platform'));
+        
+        // Real-time stats update from API
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                document.getElementById('uptime').textContent = data.uptime || '0s';
+                document.getElementById('total-req').textContent = (data.total_requests || 0).toLocaleString();
+                document.getElementById('success-req').textContent = ((data.success / Math.max(data.total_requests, 1)) * 100).toFixed(1) + '%';
+                document.getElementById('blocked').textContent = (data.waf_blocks || 0).toLocaleString();
+            } catch(e) { /* API not available */ }
+        }
+        
+        fetchStats();
+        setInterval(fetchStats, 5000);
+    </script>
+</body>
+</html>

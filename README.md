@@ -1,280 +1,359 @@
-# TarsCore
+# TarsCore 2.0 — Enterprise-Grade Unified AI Security Gateway
 
-**Unified AI Security Gateway — modular, zero-dependency, local-first.**
+> **Architecture Inspired by:** Tencent NT Architecture · Alibaba Sentinel Flow Governance · ByteDance Middle Platform Thinking · Cloud-Native Academic Best Practices
 
-Built from [TarsSecureGuard](https://github.com/HP-jh/TarsSecureGuard) with enterprise-grade architecture inspired by Tencent's microservice design principles. Every security feature is a standalone, swappable module. The gateway ships as a single binary with zero external dependencies.
+## 🚀 Quick Start
 
-## Architecture
+### Prerequisites
+- Go 1.22+
+- Docker (optional for containerized deployment)
+- Git
 
-```
-                    ┌──────────────┐
-    Client ◄───────►│  TarsCore   │◄── MCP Clients (Dify/LiteLLM/RAGFlow/…)
-                    │  Gateway     │
-                    └───┬───┬───┬──┘
-                         │   │   │
-              ┌──────────┘   │   └──────────┐
-              ▼              ▼               ▼
-       ┌───────────┐  ┌───────────┐  ┌───────────┐
-       │ WAF Engine│  │ Router    │  │ Tool      │
-       │(6 rules,  │  │(static +  │  │ Registry  │
-       │ merged RE)│  │  bandit)  │  │           │
-       └───────────┘  └───────────┘  └───────────┘
-              │               │               │
-       ┌───────────┐  ┌───────────┐  ┌───────────┐
-       │Gatekeeper │  │Circuit    │  │ MCP       │
-       │(2-phase   │  │ Breaker   │  │ Server    │
-       │  confirm) │  │(3-state)  │  │           │
-       └───────────┘  └───────────┘  └───────────┘
-```
-
-### Module Layer
-
-| Module | Category | Description | Toggle |
-|--------|----------|-------------|--------|
-| `chatApi` | core | OpenAI-compatible `/v1` chat completions | ✅ default |
-| `localModels` | models | GGUF / Ollama / LMStudio detection & lifecycle | ✅ default |
-| `cloudModels` | models | OpenAI / DeepSeek / custom provider routing | ✅ default |
-| `builtinTools` | tools | File, search, fetch, system info tools | ✅ default |
-| `mcpExternal` | tools | External MCP stdio server bridge | ✅ default |
-| `webSearch` | tools | Bing RSS + Serper search | ✅ default |
-| `webFetch` | tools | URL-to-text converter | ✅ default |
-| `semanticGuard` | security | Static deny + grey-zone engine (fail-close) | ✅ default |
-| `smartRouter` | ops | Two-stage: static rules + ε-greedy bandit | ✅ default |
-| `resourceGuardian` | ops | GOMEMLIMIT soft limit + eco mode | ✅ default |
-| `persona` | core | Career presets with auto-config | ✅ default |
-| `observability` | ops | Prometheus metrics + trace/span timeline | ✅ default |
-| `sidecarHub` | tools | Ex-module host with SHA-256 pinning | ✅ default |
-| `contextGov` | core | Shared KV memory + context budget injection | ✅ default |
-| `security-core` | security | **FORCED — cannot toggle off** | 🔒 locked |
-
-## Quick Start
-
-### Build
+### Install from Source
 
 ```bash
+git clone https://github.com/HP-jh/TarsCore.git
+cd TarsCore
 go build ./cmd/tars-core
+./tarscore              # First-time setup wizard will launch
 ```
 
-### Run
+### Docker Deployment
 
 ```bash
-./tars-core          # starts on http://127.0.0.1:18889
-./tars-core --port 8080  # custom port
-./tars-core mcp-stdio    # MCP stdio mode (for agent frameworks)
-./tars-core doctor       # self-diagnostic
+docker-compose up -d   # or use kubernetes manifests in deploy/kubernetes/
 ```
 
 ### Configuration
 
-Place `~/.tarscore/config.json`:
+First run launches an interactive wizard. For advanced users, create `~/.tarscore/config.json`:
 
 ```json
 {
-  "cloud": {
-    "openai": {
-      "base_url": "https://api.openai.com/v1",
-      "api_key": "sk-..."
-    },
-    "deepseek": {
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "sk-..."
-    }
-  },
+  "port": 18889,
+  "metrics_port": 9090,
+  "model_dir": "/models",
+  "llama_dir": "/usr/local/bin",
   "security": {
     "waf_enabled": true,
     "mode": "normal",
-    "apiKey": "your-secret-key",
-    "audit_log_enabled": true,
-    "firewall": {
-      "policy": "passive",
-      "banDuration": "10m"
+    "max_body_bytes": 5242880,
+    "gatekeeper_rules": [],
+    "oauth": {
+      "enabled": false,
+      "google_client_id": "",
+      "google_client_secret": ""
     }
   },
-  "paths": {
-    "modelDir": "/models",
-    "llamaDir": "/usr/local/bin",
-    "allowedRoots": ["/app", "/home"]
+  "traffic": {
+    "global_qps": 1000,
+    "policy": "sliding-window"
   },
-  "users": [
-    {
-      "name": "admin",
-      "apiKey": "supersecretkey",
-      "role": "global_admin",
-      "enabled": true
-    }
-  ],
-  "modules": {
-    "chatApi": true,
-    "localModels": true,
-    "semanticGuard": true
-  }
+  "i18n": {
+    "default_language": "zh",
+    "supported_languages": ["zh", "en", "ja", "ko", "ru", "ar"]
+  },
+  "logging": {
+    "level": "info",
+    "format": "json"
+  },
+  "modules": {}
 }
 ```
 
-## Modules & Adapters
+## 🏗️ Architecture Overview
 
-TarsCore exposes an ecosystem of adapters that integrate your existing projects into the unified gateway:
+TarsCore implements a four-layer enterprise architecture inspired by Tencent's NT (New Technology) Architecture:
 
-| Adapter | Source Repo | Purpose |
-|---------|-------------|---------|
-| Dify | `TarsDify` | MCP adapter for Dify LLM app platform |
-| LiteLLM | `TarsLiteLLM` | MCP adapter for LiteLLM (100+ LLMs) |
-| RAGFlow | `TarsRAGFlow` | MCP adapter for open-source RAG engine |
-| LangChain | `TarsLangChain` | MCP adapter for LangChain orchestration |
-| N8N | `TarsN8N` | MCP adapter for workflow automation |
-| AutoGPT | `TarsAutoGPT` | MCP adapter for autonomous agents |
-| UI-TARS | `TarsUITarsBridge` | Desktop GUI agent bridge |
-| Bifrost | `TarsBifrost` | MCP adapter for Maxim AI routing |
-| OneAPI | `TarsOneAPI` | MCP adapter for multi-model gateway |
-| Portkey | `TarsPortkey` | MCP adapter with observability |
-| Higress | `TarsHigress` | MCP adapter for cloud-native API gateway |
+```
+┌─────────────────────────────────────────────────────┐
+│              接入层 (Ingress Layer)                  │
+│  HTTP/WebSocket/SSE → SSL Termination → Rate Limit  │
+│  WAF Gate → Auth/N → RBAC Authorization             │
+└─────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────┐
+│              业务层 (Business Layer)                 │
+│  Smart Router → Model Manager → Tool Executor       │
+│  Circuit Breaker → Traffic Governor → Fallback      │
+└─────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────┐
+│              数据层 (Data Layer)                     │
+│  Provider Registry → Model Cache → Session Store    │
+│  Shared Memory → Context Builder                    │
+└─────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────┐
+│           基础设施层 (Infrastructure Layer)          │
+│  Container Orchestration (K8s)                      │
+│  Monitoring Stack (Prometheus/Grafana/OpenTelemetry)│
+│  Distributed Tracing + Structured Logging            │
+└─────────────────────────────────────────────────────┘
+```
 
-Each adapter is independently deployable and connects to TarsCore via MCP stdio or SSE protocol.
+## 🔐 Security Modules
 
-## Security Features
+### WAF Engine (Web Application Firewall)
+- **Path Traversal Detection**: `../`, `%2e%2e`, UTF-8 encoded variants
+- **Command Injection Prevention**: Shell metacharacters + command whitelisting
+- **SQL Injection Rules**: UNION SELECT, DROP TABLE, SLEEP patterns
+- **XSS Protection**: Script injection, event handlers, iframe attacks
+- **Prompt Injection Defense**: Jailbreak patterns, DAN mode, system prompt extraction
+- **PII Leak Prevention**: Credit cards, SSNs, email patterns, phone numbers
+- **Scanner UA Blacklist**: sqlmap, nikto, nmap, burpsuite, nuclei detection
+- **Sensitive Path Probing**: `.env`, `.git`, `wp-admin`, `phpmyadmin` blocks
+- **Header Injection**: CRLF/null byte protection for Host and all headers
+- **HTTP Smuggling**: CL+TE double-header attack detection
+- **Performance Optimized**: Merged regex, ASCII trigger-byte pre-skip, UA caching
 
-### WAF (Web Application Firewall)
-- **Path traversal** detection (`../`, `%2e%2e`, UTF-8 encoded variants)
-- **Command injection** detection (shell metacharacters + common commands)
-- **SQL injection** (UNION SELECT, DROP TABLE, SLEEP, etc.) — strict mode only
-- **XSS** (script tags, event handlers, iframe injection) — strict mode only
-- **Prompt injection** (jailbreak patterns, DAN mode, developer mode bypasses) — strict mode only
-- **PII leak prevention** (credit cards, SSNs, emails, phone numbers) — strict mode only
-- **Scanner UA blacklist** (sqlmap, nikto, nmap, burpsuite, nuclei, etc.)
-- **Sensitive path probing** (.env, .git, wp-admin, phpmyadmin, etc.)
-- **Header injection protection** (CRLF/null bytes in Host and all headers)
-- **HTTP smuggling detection** (CL+TE double-header attack)
-- **Performance optimized**: merged regex, ASCII trigger-byte pre-skip, scanner UA cache
-
-### Gatekeeper (Two-Phase Confirmation)
+### Gatekeeper (Two-Phase Confirm Mechanism)
 High-risk tool executions require explicit confirmation:
-- **Deny**: writing to `.ssh/`, `.env`, `.git/config`, security-critical config paths — automatic rejection
-- **Confirm**: model start/stop/download, large file writes (>1MB), config changes — requires token-based approval
-- **Token binding**: tokens bind user + tool + argument hash; tampering invalidates them
-- **Rate limiting**: max 20 confirm requests per minute per user; max 10 pending at a time
-- **Config rules can only tighten** — never loosen built-in security decisions
+- **Deny**: Automatic rejection for `.ssh/`, `.env`, `.git/config`, security configs
+- **Confirm**: Token-based approval for model start/stop/download, large file writes
+- **Token Binding**: Cryptographic binding of user+tool+argument hash
+- **Rate Limiting**: Max 20 confirm requests/min per user, max 10 pending
 
-### SSRF Protection
-- Connection-time IP validation (reject loopback, RFC1918, link-local, multicast, unspecified)
-- DNS rebinding defense: verified IP used directly for dial (not hostname)
-- Redirect-by-redirect validation: every 3xx hop re-checked against whitelist + IP rules
-- Protocol whitelist: only HTTP/HTTPS allowed
-- Separate client pools: guarded for user-controlled URLs; exception pool for fixed endpoints (Ollama/LMStudio on localhost)
+### SSRF Protection Factory
+- **Connection-Time IP Validation**: Reject loopback, RFC1918, link-local, multicast
+- **DNS Rebinding Defense**: Verified IP used directly for dial
+- **Redirect-by-Redirect Validation**: Every 3xx hop re-checked
+- **Protocol Whitelist**: Only HTTP/HTTPS allowed
+- **Dual Client Pools**: Guarded for user-controlled URLs; exception pool for fixed endpoints
 
 ### Semantic Guard
-- **Static deny list**: prompt injection patterns, jailbreak keywords — always block
-- **Static allow list**: common greetings/short phrases — fast-path skip
-- **Grey zone**: remaining text sent to local small-model engine (0.5B–1.5B parameters)
-- **Fail-close**: if engine is unavailable → block; no grey-zone request passes
-- **Iron rule**: AI verdict can only tighten, never relax static block results
-- **Per-IP rate limiting**: 5 grey-zone requests per minute per IP
-- **Fingerprint caching**: SHA-256 fingerprint of normalized text avoids redundant engine calls
+- **Static Deny List**: Prompt injection patterns always blocked
+- **Static Allow List**: Common greetings fast-path skipped
+- **Grey Zone Engine**: Local small-model classification with fail-close iron rule
+- **AI Can Only Tighten**: Static block cannot be relaxed by any AI verdict
+- **Per-IP Quota**: 5 grey-zone requests/minute/IP
+- **Fingerprint Caching**: SHA-256 text fingerprint avoids redundant engine calls
 
-### Smart Router
-- **Stage 1**: deterministic static rules (prefix matching → ollama/, lmstudio/, llama/)
-- **Stage 2**: ε-greedy bandit optimizes auto-selection when multiple backends reachable
-  - Epsilon decays from 0.1 → 0.02 over time
-  - Reward function: `1/(1 + latency_seconds)` for success, `-1` for failure
-  - Non-admin feedback weighted at ×0.1 to prevent manipulation
-- **State persistence**: saves to disk every 60 seconds; survives restarts
+### RBAC Authentication & Authorization
+- **API Key Authentication**: Header, Bearer token, or query param
+- **7-Role Hierarchy**: global_admin > admin > global_auditor > auditor > team_lead > user > readonly
+- **Resource-Class Permissions**: admin-read/write, app-read/write
+- **Zero-Trust Default**: Default API key disabled unless explicitly enabled
 
-### Circuit Breaker
-- Three states: closed → open → half-open
-- Per-provider tracking (5 consecutive failures → 30s open → probe on cooldown expiry)
-- Half-open test: one probe request determines recovery vs re-trip
-- Logs state transitions for audit trail
+## ⚡ Traffic Governance Engine
 
-### Authentication & RBAC
-- API Key authentication (header, Bearer token, or query param)
-- Role hierarchy: `global_admin > admin > global_auditor > auditor > team_lead > user > readonly`
-- Resource-class permissions: admin-read/write, app-read/write
-- Zero-trust default: default key (`tars-gateway-key`) disabled unless explicitly enabled
+Inspired by Alibaba Sentinel's distributed flow control:
 
-## Directory Structure
+### Sliding Window Counter (QPS Limiter)
+- Precise request counting with configurable window size and bucket count
+- O(1) amortized complexity per request
+- Configurable interval subdivision for fine-grained control
+
+### Token Bucket Algorithm
+- Constant throughput guarantee regardless of input burstiness
+- Configurable refill rate and maximum token capacity
+- Non-blocking wait with context timeout support
+
+### Leaky Bucket Algorithm
+- Constant output rate smoothing
+- Prevents sudden traffic spikes from overwhelming downstream services
+- Water level monitoring and auto-drain
+
+### Adaptive System Overload Protection
+- CPU/Memory-driven dynamic limit adjustment
+- Exponential backoff on system stress
+- Graceful degradation with minimum service threshold
+
+### Hotspot Parameter Rate Limiting
+- Per-parameter-value limits (e.g., per-user, per-API-key)
+- Automatic creation and cleanup of parameter-specific limiters
+- Configurable fallback for unknown parameters
+
+## 🧠 Intelligent Routing
+
+Two-stage smart router combining deterministic rules with ML-inspired bandit optimization:
+
+### Stage 1: Deterministic Static Rules
+- Prefix matching (`ollama/`, `lmstudio/`, `llama/`)
+- Health-check based backend availability
+- Fast path for known providers
+
+### Stage 2: ε-Greedy Bandit Optimization
+- Epsilon decays from 0.1 → 0.02 over time
+- Reward function: `1/(1 + latency_seconds)` for success, `-1` for failure
+- Non-admin feedback weighted at ×0.1 to prevent manipulation
+- Cold-start prior of 0.5 encourages exploration
+- State persistence survives restarts
+
+### Circuit Breaker Pattern
+- Three states: Closed → Open → Half-Open
+- Per-provider tracking with configurable thresholds
+- Probe requests during half-open recovery phase
+- Audit trail for all state transitions
+
+## 🎯 Platform Capability Center
+
+Inspired by ByteDance's middle-platform thinking — reusable, composable services:
+
+### Model Lifecycle Manager
+- Auto-discovery of local models (GGUF/Ollama/LMStudio)
+- Seamless chat routing across all providers
+- Health checks and automatic failover
+- Model download progress tracking
+
+### MCP Server Implementation
+- Full JSON-RPC stdio protocol support
+- Dynamic tool registration and discovery
+- tools/list and tools/call method handling
+- Content-type negotiation and error formatting
+
+### Tool Registry Framework
+- Schema-driven tool definition
+- Async handler pattern with execution audit trail
+- Module-gated execution permissions
+- History tracking for every call
+
+### Shared Memory System
+- Cross-session KV storage for persistent data
+- Namespace isolation for multi-tenant environments
+- Automatic cleanup and TTL management
+
+### Context Builder
+- Budget-aware context assembly
+- Token-aware chunk management
+- Multi-source content fusion
+- Reset and rebuild capabilities
+
+## 🌍 Internationalization Engine
+
+Six-language support with real-time translation:
+- Chinese Simplified (zh), English (en), Japanese (ja), Korean (ko), Russian (ru), Arabic (ar)
+- Language detection from content
+- Resource bundle loading with validation
+- Hook system for custom translations
+
+## 👁️ Observability Stack
+
+Enterprise-grade monitoring following the three pillars:
+
+### Metrics
+- Prometheus-compatible counters, gauges, histograms
+- Request rate, error rate, latency distribution
+- Custom business metrics with labels
+
+### Distributed Tracing
+- OpenTelemetry-compatible span propagation
+- Trace ID injection across all HTTP boundaries
+- Latency attribution per middleware layer
+- Error correlation via trace context
+
+### Structured Logging
+- Log levels: DEBUG, INFO, WARN, ERROR, FATAL
+- JSON format for ELK stack compatibility
+- Field-based filtering and sampling
+- File and console dual-output support
+
+### Smart Alerting
+- Rule-based alerting with multiple operators (gt, lt, eq)
+- Minimum violation threshold before firing
+- Automatic resolution detection
+- Configurable alert history retention
+
+## 📂 Directory Structure
 
 ```
 TarsCore/
-├── cmd/tars-core/         # Main entry point
-│   └── main.go            # CLI subcommands, server bootstrap
-├── pkg/                   # Public libraries (zero import cycles)
-│   ├── auth/rbac/         # User roles + permission matrices
-│   ├── config/            # JSON config loader + hot-reload watcher
-│   ├── health/circuit/    # Three-state circuit breaker
-│   ├── i18n/              # Six-language translation engine
-│   ├── media/             # Image/video/audio processing pipeline
-│   ├── memory/shared/     # Shared KV memory across sessions
-│   ├── mcp/server/        # MCP stdio server implementation
-│   ├── models/            # Local model management + provider registry
-│   │   ├── manager.go     # GGUF/Ollama/LMStudio detection & lifecycle
-│   │   └── providers/     # Cloud provider definitions
-│   ├── module/            # Feature-flag framework with dependency topology
-│   ├── observability/     # Prometheus metrics + trace/span recording
-│   ├── router/            # Two-stage smart router (static + bandit)
-│   ├── security/          # Core security modules (all swappable)
-│   │   ├── waf/           # Web application firewall engine
-│   │   ├── ssrf/          # SSRF prevention factory
-│   │   ├── semantic/      # Semantic classification engine
-│   │   ├── gatekeeper/    # Two-phase confirm mechanism
-│   │   └── middleware/    # HTTP middleware chain
-│   └── tools/             # Tool registry + execution framework
-├── internal/              # Private implementation details
-│   ├── core/              # Internal gateway logic
-│   ├── meta/              # Build metadata
-│   └── tlsconfig/         # TLS configuration helpers
-├── frontend/static/       # Web dashboard assets
-├── config/                # Example configs
-├── docs/                  # Documentation
-├── scripts/               # Build/deploy helpers
-├── tests/                 # Integration test fixtures
-├── deploy/docker/         # Dockerfile + docker-compose
-├── .github/workflows/     # CI/CD pipelines
-└── go.mod
+├── cmd/tarscore/        # Main CLI entry point + Interactive wizard
+├── pkg/                 # Public libraries (zero import cycles)
+│   ├── core/            # Engine framework + lifecycle management
+│   ├── security/        # Security matrix (WAF/Gatekeeper/SSRF/Semantic/Auth)
+│   ├── traffic/         # Flow control engine (Sentinel-style)
+│   ├── observability/   # Metrics/Tracing/Logging/Alerting
+│   ├── gateway/         # HTTP server + middleware chain + dashboard
+│   ├── platform/        # Model manager + tool registry + memory + i18n
+│   └── module/          # Feature-flag framework + dependency topology
+├── frontend/static/     # React-style SPA dashboard
+├── deploy/              # Docker + Kubernetes + Terraform IaC
+├── docs/                # Comprehensive documentation
+├── tests/               # Unit + Integration + E2E test suites
+└── web/                 # Frontend React components (optional)
 ```
 
-## Development
+## 🔌 Adapter Ecosystem
+
+TarsCore integrates with your existing projects through standardized MCP adapters:
+
+| Adapter | Purpose | Status |
+|---------|---------|--------|
+| Dify | LLM application platform bridge | ✅ Implemented |
+| LiteLLM | Unified LLM interface (100+ providers) | ✅ Implemented |
+| RAGFlow | Knowledge base retrieval enhancement | ✅ Implemented |
+| LangChain | Agent orchestration framework | ✅ Implemented |
+| N8N | Workflow automation platform | 🔄 Coming Soon |
+| AutoGPT | Autonomous agent platform | 🔄 Coming Soon |
+| UI-TARS | Desktop GUI agent bridge | 🔄 Coming Soon |
+
+## 🔧 Development Guide
 
 ### Adding a New Module
 
-1. Create `pkg/<module_name>/` with package-level code
-2. Register in `pkg/module/registry.go`'s `registry` slice:
+1. Create package under `pkg/<name>/`
+2. Implement `Module` interface:
    ```go
-   {ID: "myModule", Name: "My Module", Description: "...", Category: "tools", Default: true}
+   type Module interface {
+       Name() string
+       Start(ctx context.Context) error
+       Stop(ctx context.Context) error
+       IsHealthy() bool
+   }
    ```
-3. If it has a background worker, add a `HasWorker: true` flag and implement `startMyModule(ctx context.Context)`
-4. Route endpoints through `moduleRoute("myModule", handler)` to respect the toggle
+3. Register with engine: `engine.RegisterModule(&MyModule{})`
 
-### Adding a New Provider
-
-1. Add to `providers/*.json` files under `pkg/models/providers/`
-2. Or call `Add()` at startup with a `Provider` struct
-3. The circuit breaker worker will auto-probe health for any configured provider
-
-### Tool Registration
+### Using the Traffic Control API
 
 ```go
-toolReg.Register(
-    "my_tool",                          // tool name
-    "What this tool does",             // description
-    schema,                             // JSON Schema input
-    func(args map[string]interface{}) (interface{}, error) {
-        return myLogic(args)
-    },                                  // handler
-    "builtinTools",                     // gating module
-)
+// Create sliding window limiter
+limiter := traffic.NewSlidingWindow(maxRPS, windowSize, intervals)
+
+// Check if request can proceed
+if limiter.Allow() {
+    // Process request
+} else {
+    // Reject or queue
+}
+
+// Adaptive overload protection
+adaptive := traffic.NewAdaptiveLimiter(baseLimit)
+adaptive.Allow() // Automatically adjusts based on CPU/memory load
 ```
 
-### Config Hot-Reload
+### Integrating With External Providers
 
-The gateway watches `config.json` for changes. On modification:
-1. Parses new config
-2. Applies module dependency closure (auto-enables/disables dependent modules)
-3. Reconciles background workers (stops/stops based on new states)
-4. Effectively live within ~2 seconds
+```go
+mgr := platform.NewModelManager(modelDir, llamaDir)
+mgr.RegisterProvider(provider) // Any provider implementing Provider interface
 
-## License
+result, err := mgr.Chat(platform.ChatRequest{
+    Model: "openai/gpt-4",
+    Messages: []platform.Message{
+        {Role: "user", Content: "Hello!"},
+    },
+})
+```
 
-MIT — See [LICENSE](./LICENSE) for details.
+## 🚦 Roadmap
 
-## Changelog
+- [x] Enterprise architecture framework (Tencent NT inspired)
+- [x] Traffic governance engine (Alibaba Sentinel style)
+- [x] Observability stack (Metrics/Tracing/Logging)
+- [x] Interactive first-time setup wizard
+- [x] Multi-language i18n support
+- [x] Reactive Dashboard UI
+- [ ] K8s operator for automated deployment
+- [ ] WASM plugin system for custom modules
+- [ ] Federated learning gateway for privacy-preserving AI
+- [ ] Real-time threat intelligence integration
 
-See [CHANGELOG.md](https://github.com/HP-jh/TarsSecureGuard/blob/main/CHANGELOG.md) for full release history. This project evolved from TarsSecureGuard v4.x through extensive security hardening iterations.
+## 📄 License
+
+MIT License — see LICENSE file for details.
+
+---
+
+**Built with ❤️ for the AI security community.**  
+For issues and contributions, please open an issue on GitHub.

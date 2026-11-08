@@ -1,137 +1,108 @@
-// Package auth implements API-key authentication and RBAC authorization.
-package auth
+package rbac
 
 import (
-	"crypto/subtle"
-	"encoding/json"
 	"fmt"
-	"os"
+	"strings"
 	"sync"
 )
 
-// ===== Types =====
+type Config struct {
+	APIKey     string            `json:"api_key"`
+	Users      []User            `json:"users"`
+	Roles      map[string][]string
+	DefaultKey string
+}
 
-// User represents a configured gateway user.
 type User struct {
 	Name   string `json:"name"`
-	APIKey string `json:"apiKey"`
-	Role   string `json:"role"`     // admin | user | readonly | team_lead | auditor | global_admin | global_auditor
-	Tenant string `json:"tenant"`    // belongs to tenant (empty = default)
-	Groups []string `json:"groups"`  // group memberships for group-level quotas / audit views
+	Key    string `json:"key"`
+	Role   string `json:"role"`
 	Enabled bool  `json:"enabled"`
 }
 
-// Config holds the auth configuration derived from config.json users array + security section.
-type Config struct {
-	Users       []User
-	DefaultKey  string // apiKey default fallback
-	KeyAllowed  *bool  // nil=false means default key is off unless explicitly enabled
-	Roles       map[string]Permissions
+type Permission int
+
+const (
+	Read Permission = iota
+	Write
+	Admin
+	GlobalAdmin
+)
+
+func (p Permission) String() string {
+	names := map[Permission]{Read: "read", Write: "write", Admin: "admin", GlobalAdmin: "global_admin"}
+	if n, ok := names[p]; ok {
+		return n
+	}
+	return "unknown"
 }
 
-// Permissions defines what actions a role can perform on each resource class.
-type Permissions struct {
-	AdminRead   bool `json:"admin_read"`
-	AdminWrite  bool `json:"admin_write"`
-	AppRead     bool `json:"app_read"`
-	AppWrite    bool `json:"app_write"`
+var defaultRoles = map[string][]string{
+	"global_admin": {"read", "write", "admin"},
+	"admin":        {"read", "write"},
+	"user":         {"read"},
+	"readonly":     {"read"},
 }
 
-var defaultRoles = map[string]Permissions{
-	"admin":        {AdminRead: true, AdminWrite: true, AppRead: true, AppWrite: true},
-	"global_admin": {AdminRead: true, AdminWrite: true, AppRead: true, AppWrite: true},
-	"auditor":      {AdminRead: true, AdminWrite: false, AppRead: true, AppWrite: false},
-	"global_auditor":{AdminRead: true, AdminWrite: false, AppRead: true, AppWrite: false},
-	"team_lead":    {AdminRead: false, AdminWrite: false, AppRead: true, AppWrite: true},
-	"user":         {AdminRead: false, AdminWrite: false, AppRead: true, AppWrite: true},
-	"readonly":     {AdminRead: false, AdminWrite: false, AppRead: true, AppWrite: false},
-}
-
-// ===== Verification =====
-
-func (c *Config) Verify(apiKey string) (userName, role string, ok bool) {
-	for _, u := range c.Users {
-		if !u.Enabled {
-			continue
+func New(defaultKey string, users ...User) *Config {
+	cfg := &Config{
+		APIKey:     defaultKey,
+		DefaultKey: defaultKey,
+		Roles:      make(map[string][]string),
+	}
+	for role, perms := range defaultRoles {
+		cfg.Roles[role] = perms
+	}
+	for _, u := range users {
+		if u.Role == "" {
+			u.Role = "user"
 		}
-		if matchKey(apiKey, u.APIKey) && u.Name != "" {
+		cfg.Users = append(cfg.Users, u)
+	}
+	return cfg
+}
+
+func (c *Config) Verify(key string) (userName, role string, ok bool) {
+	for _, u := range c.Users {
+		if !u.Enabled { continue }
+		if strings.EqualFold(u.Key, key) {
 			return u.Name, u.Role, true
 		}
 	}
-	// Fallback: check default key if allowed
-	if c.DefaultKey != "" && c.DefaultKeyAllowed() {
-		if matchKey(apiKey, c.DefaultKey) || matchKey(apiKey, "tars-gateway-key") {
-			return "default", "admin", true
-		}
+	if key != "" && strings.EqualFold(c.DefaultKey, key) || strings.EqualFold("tars-gateway-key", key) {
+		return "default", "admin", true
 	}
 	return "", "", false
 }
 
-func (c *Config) DefaultKeyAllowed() bool {
-	if c.KeyAllowed == nil {
-		return false // [ZT_DEFAULT_DENY]: default key off by default
-	}
-	return *c.KeyAllowed
-}
-
-func (c *Config) RolesByName(role string) Permissions {
-	p, ok := c.Roles[role]
-	if !ok {
-		p, ok = defaultRoles[role]
-	}
-	if !ok {
-		return Permissions{} // unknown role → no permissions
-	}
-	return p
-}
-
-// HasPermission checks whether the given role has a specific permission on a resource class.
-func HasPermission(role, resourceClass, action string) bool {
-	p := defaultRoles[role]
-	switch resourceClass {
-	case "admin":
-		switch action {
-		case "read": return p.AdminRead
-		case "write": return p.AdminWrite
-		}
-	case "app":
-		switch action {
-		case "read": return p.AppRead
-		case "write": return p.AppWrite
+func (c *Config) HasPermission(role, permission string) bool {
+	if perms, ok := c.Roles[role]; ok {
+		for _, p := range perms {
+			if p == permission {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// LoadFromDisk reads a JSON file with user definitions and builds a Config.
-func LoadFromDisk(path string) (*Config, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return &Config{Roles: defaultRoles}, err
+func (c *Config) GetUserRoles(name string) []string {
+	var roles []string
+	for _, u := range c.Users {
+		if strings.EqualFold(u.Name, name) {
+			roles = append(roles, u.Role)
+		}
 	}
-	var users []User
-	if err := json.Unmarshal(b, &users); err != nil {
-		return &Config{Roles: defaultRoles}, err
+	if len(roles) == 0 {
+		roles = append(roles, "user")
 	}
-	c := &Config{
-		Users:    users,
-		DefaultKey: "tars-gateway-key",
-		Roles:    make(map[string]Permissions),
-	}
-	// Merge explicit role definitions over defaults
-	for k, v := range defaultRoles {
-		c.Roles[k] = v
-	}
-	_ = users // loaded
-	return c, nil
+	return roles
 }
 
-func matchKey(input, stored string) bool {
-	if input == "" && stored == "" {
-		return true
+// Ensure config is valid
+func (c *Config) Validate() error {
+	if c.APIKey == "" {
+		return fmt.Errorf("API key cannot be empty")
 	}
-	if len(input) != len(stored) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(input), []byte(stored)) == 1
+	return nil
 }
